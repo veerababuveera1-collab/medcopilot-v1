@@ -59,10 +59,10 @@ if not HF_API_KEY:
     st.stop()
 
 # =============================
-# HUGGINGFACE API CALL (VERIFIED ENDPOINT)
+# HUGGINGFACE AI CALL (OFFICIAL ENDPOINT)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-small"
+    url = "https://api-inference.huggingface.co/models/google/flan-t5-small"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -81,7 +81,6 @@ def ask_llm(prompt: str) -> str:
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=90)
 
-        # Handle router maintenance / throttling
         if response.status_code == 503:
             return "⚠ AI server is busy. Please try again in 30 seconds."
 
@@ -160,5 +159,3 @@ Answer:
     st.subheader("📚 Evidence Sources")
     for s in sorted(set(sources)):
         st.write("•", s)
-
-
