@@ -59,7 +59,7 @@ if not HF_API_KEY:
     st.stop()
 
 # =============================
-# GLOBAL STANDARD HUGGINGFACE ROUTER (OPENAI COMPATIBLE)
+# HUGGINGFACE ROUTER CHAT API
 # =============================
 def ask_llm(prompt: str) -> str:
     url = "https://router.huggingface.co/v1/chat/completions"
@@ -70,7 +70,7 @@ def ask_llm(prompt: str) -> str:
     }
 
     payload = {
-        "model": "google/flan-t5-small",
+        "model": "mistralai/Mistral-7B-Instruct-v0.2",
         "messages": [
             {"role": "system", "content": "You are a clinical research assistant."},
             {"role": "user", "content": prompt}
