@@ -59,10 +59,10 @@ if not HF_API_KEY:
     st.stop()
 
 # =============================
-# HUGGINGFACE AI CALL (OFFICIAL ENDPOINT)
+# HUGGINGFACE AI CALL (NEW ROUTER ENDPOINT)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://api-inference.huggingface.co/models/google/flan-t5-small"
+    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-small"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
