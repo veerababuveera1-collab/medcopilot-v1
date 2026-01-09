@@ -72,8 +72,8 @@ def ask_llm(prompt: str) -> str:
     payload = {
         "inputs": prompt,
         "parameters": {
-            "max_new_tokens": 300,
-            "temperature": 0.3,
+            "max_new_tokens": 256,
+            "temperature": 0.2,
             "return_full_text": False
         }
     }
@@ -81,18 +81,30 @@ def ask_llm(prompt: str) -> str:
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=90)
 
+        # Handle router maintenance / throttling
+        if response.status_code == 503:
+            return "⚠ AI server is busy. Please try again in 30 seconds."
+
+        if response.status_code == 429:
+            return "⚠ API rate limit reached. Please try again later."
+
         if response.status_code != 200:
-            return f"❌ HuggingFace API Error {response.status_code}: {response.text}"
+            return f"❌ AI Error {response.status_code}: {response.text}"
 
         result = response.json()
 
-        if isinstance(result, list):
+        if isinstance(result, list) and len(result) > 0:
             return result[0].get("generated_text", "No answer generated.")
-        else:
+        elif isinstance(result, dict):
             return result.get("generated_text", "No answer generated.")
+        else:
+            return "⚠ AI returned empty response."
+
+    except requests.exceptions.Timeout:
+        return "⚠ AI request timed out. Please try again."
 
     except Exception as e:
-        return f"❌ API Connection Error: {str(e)}"
+        return f"❌ AI Connection Error: {str(e)}"
 
 # =============================
 # USER INPUT
@@ -148,4 +160,5 @@ Answer:
     st.subheader("📚 Evidence Sources")
     for s in sorted(set(sources)):
         st.write("•", s)
+
 
