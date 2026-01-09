@@ -47,17 +47,14 @@ chunked_docs = load_chunks()
 # =============================
 # LOAD GROQ API KEY
 # =============================
-GROQ_API_KEY = (
-    st.secrets.get("GROQ_API_KEY") or
-    os.environ.get("GROQ_API_KEY")
-)
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
     st.error("❌ Groq API key not found. Add GROQ_API_KEY in Streamlit Secrets.")
     st.stop()
 
 # =============================
-# GROQ CHAT API
+# GROQ CHAT API (NEW MODEL)
 # =============================
 def ask_llm(prompt: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -68,7 +65,7 @@ def ask_llm(prompt: str) -> str:
     }
 
     payload = {
-        "model": "llama3-8b-8192",
+        "model": "llama-3.1-8b-instant",   # ✅ new supported model
         "messages": [
             {"role": "system", "content": "You are a clinical research assistant."},
             {"role": "user", "content": prompt}
