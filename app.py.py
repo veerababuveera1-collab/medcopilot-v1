@@ -54,11 +54,15 @@ HF_API_KEY = (
     os.environ.get("HF_TOKEN")
 )
 
+if not HF_API_KEY:
+    st.error("❌ HuggingFace API key not found. Add HF_API_KEY in Streamlit Secrets.")
+    st.stop()
+
 # =============================
-# HUGGINGFACE API CALL (NEW ENDPOINT)
+# HUGGINGFACE API CALL (VERIFIED ENDPOINT)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
+    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-small"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -67,20 +71,19 @@ def ask_llm(prompt: str) -> str:
 
     payload = {
         "inputs": prompt,
-        "options": {"wait_for_model": True}
+        "options": {
+            "wait_for_model": True,
+            "use_cache": True
+        }
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
 
-        if response.status_code != 200:
-            return f"❌ HuggingFace API Error: {response.text}"
+    if response.status_code != 200:
+        return f"❌ HuggingFace API Error {response.status_code}: {response.text}"
 
-        data = response.json()
-        return data[0]["generated_text"]
-
-    except Exception as e:
-        return f"❌ API Connection Error: {str(e)}"
+    data = response.json()
+    return data[0]["generated_text"]
 
 # =============================
 # USER INPUT
@@ -95,13 +98,8 @@ question = st.text_input(
 # =============================
 if st.button("Ask MedCopilot") and question.strip():
 
-    if not HF_API_KEY:
-        st.error("❌ HF_API_KEY not found. Please add it in Streamlit Secrets.")
-        st.stop()
-
     with st.spinner("🔍 Searching medical knowledge..."):
 
-        # Vector search
         q_embedding = embedding_model.encode([question])
         distances, indices = index.search(np.array(q_embedding), 5)
 
