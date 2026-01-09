@@ -62,10 +62,11 @@ with st.expander("🔧 Debug Info"):
     st.write("HF_API_KEY detected:", "YES" if HF_API_KEY else "NO")
 
 # =============================
-# HUGGINGFACE API CALL
+# HUGGINGFACE API CALL (NEW ENDPOINT)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
+    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
+
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
         "Content-Type": "application/json"
