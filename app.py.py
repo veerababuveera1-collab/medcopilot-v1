@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 st.title("🧠 MedCopilot V2 — Clinical Research Copilot")
-st.caption("Evidence-based medical Q&A (Global Standard AI)")
+st.caption("Evidence-based medical Q&A (Groq Powered AI)")
 st.warning("⚠ This AI system is for research support only. Not medical advice.")
 
 # =============================
@@ -45,44 +45,40 @@ index = load_faiss_index()
 chunked_docs = load_chunks()
 
 # =============================
-# LOAD API KEY
+# LOAD GROQ API KEY
 # =============================
-HF_API_KEY = (
-    st.secrets.get("HF_API_KEY") or
-    st.secrets.get("HF_TOKEN") or
-    os.environ.get("HF_API_KEY") or
-    os.environ.get("HF_TOKEN")
+GROQ_API_KEY = (
+    st.secrets.get("GROQ_API_KEY") or
+    os.environ.get("GROQ_API_KEY")
 )
 
-if not HF_API_KEY:
-    st.error("❌ HuggingFace API key not found. Add HF_API_KEY in Streamlit Secrets.")
+if not GROQ_API_KEY:
+    st.error("❌ Groq API key not found. Add GROQ_API_KEY in Streamlit Secrets.")
     st.stop()
 
 # =============================
-# HUGGINGFACE ROUTER TEXT GENERATION API (FREE TIER)
+# GROQ CHAT API
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
+    url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 256,
-            "temperature": 0.2,
-            "return_full_text": False
-        }
+        "model": "llama3-8b-8192",
+        "messages": [
+            {"role": "system", "content": "You are a clinical research assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 400
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
-
-        if response.status_code == 503:
-            return "⚠ AI server is busy. Please try again in 30 seconds."
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
 
         if response.status_code == 429:
             return "⚠ API rate limit reached. Please try again later."
@@ -90,14 +86,8 @@ def ask_llm(prompt: str) -> str:
         if response.status_code != 200:
             return f"❌ AI Error {response.status_code}: {response.text}"
 
-        result = response.json()
-
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("generated_text", "No answer generated.")
-        elif isinstance(result, dict):
-            return result.get("generated_text", "No answer generated.")
-        else:
-            return "⚠ AI returned empty response."
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
 
     except requests.exceptions.Timeout:
         return "⚠ AI request timed out. Please try again."
@@ -121,7 +111,7 @@ if st.button("Ask MedCopilot") and question.strip():
     with st.spinner("🔍 Searching medical knowledge..."):
 
         q_embedding = embedding_model.encode([question])
-        distances, indices = index.search(np.array(q_embedding), 5)
+        _, indices = index.search(np.array(q_embedding), 5)
 
         context = ""
         sources = []
