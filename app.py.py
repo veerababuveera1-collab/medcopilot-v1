@@ -5,7 +5,6 @@ import faiss
 import pickle
 import requests
 from sentence_transformers import SentenceTransformer
-import plotly.express as px
 
 # =============================
 # PAGE CONFIG
@@ -21,12 +20,11 @@ st.set_page_config(
 st.markdown("""
 # 🧠 MedCopilot  
 ### Clinical Intelligence Platform for Evidence-Based Medicine  
-
-⚠ **Research Support Only. Not Medical Advice**
+⚠ *Research Support Only. Not Medical Advice*
 """)
 
 # =============================
-# LOAD EMBEDDING MODEL
+# LOAD MODELS
 # =============================
 @st.cache_resource
 def load_embedding_model():
@@ -46,12 +44,12 @@ index = load_faiss_index()
 chunked_docs = load_chunks()
 
 # =============================
-# LOAD GROQ API KEY
+# GROQ API KEY
 # =============================
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    st.error("❌ GROQ_API_KEY not found. Add it in Streamlit Secrets.")
+    st.error("❌ GROQ_API_KEY not found. Please add it in Streamlit Secrets.")
     st.stop()
 
 # =============================
@@ -68,7 +66,16 @@ def ask_llm(prompt):
     payload = {
         "model": "llama-3.1-8b-instant",
         "messages": [
-            {"role": "system", "content": "You are a clinical research assistant. Answer using ONLY the given evidence."},
+            {
+                "role": "system",
+                "content": (
+                    "You are a clinical research assistant. "
+                    "Answer strictly using the given medical evidence. "
+                    "Ignore unrelated diseases. "
+                    "Do not assume. "
+                    "Format output in clinical sections."
+                )
+            },
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.2
@@ -112,13 +119,13 @@ with st.sidebar:
     """)
 
 # =============================
-# USER INPUT
+# INPUT
 # =============================
 st.subheader("💬 Ask Clinical Intelligence")
 
 question = st.text_input(
     "Enter your clinical research question",
-    placeholder="Example: What are the causes, diagnosis and complications of malaria?"
+    placeholder="Example: What are the causes, diagnosis, treatment and complications of malaria?"
 )
 
 # =============================
@@ -140,7 +147,7 @@ if st.button("Run Clinical Analysis") and question.strip():
             sources.append(f'{chunk["metadata"]["source"]} (page {chunk["metadata"]["page"]})')
 
         prompt = f"""
-Answer using only this evidence.
+Answer using only this medical evidence.
 
 Question:
 {question}
@@ -148,7 +155,13 @@ Question:
 Medical Evidence:
 {context}
 
-Give clinical structured answer.
+Format answer in clinical sections:
+- Definition
+- Pathophysiology
+- Diagnosis
+- Treatment
+- Complications
+- Prognosis
 """
 
         answer = ask_llm(prompt)
@@ -159,9 +172,6 @@ Give clinical structured answer.
     st.subheader("🩺 Clinical Intelligence Report")
     st.write(answer)
 
-    # =============================
-    # ANALYTICS
-    # =============================
     st.subheader("🧪 Answer Confidence")
     st.progress(0.97)
     st.write("97%")
@@ -173,23 +183,6 @@ Give clinical structured answer.
     for s in sorted(set(sources)):
         st.write("•", s)
 
-    # =============================
-    # VISUAL ANALYTICS
-    # =============================
-    st.subheader("📊 Clinical Insight Visualization")
-
-    fig = px.bar(
-        x=["Evidence Strength", "Clinical Relevance", "Guideline Match"],
-        y=[92, 89, 94],
-        labels={"x": "Metric", "y": "Score %"},
-        title="Clinical Evidence Quality"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    # =============================
-    # FOLLOW UPS
-    # =============================
     st.subheader("🔍 Smart Follow-up Suggestions")
     st.write("• What are the complications?")
     st.write("• What diagnostic tests confirm this?")
