@@ -1,0 +1,7 @@
+streamlit
+faiss-cpu
+numpy
+pickle-mixin
+sentence-transformers
+transformers
+pypdf
