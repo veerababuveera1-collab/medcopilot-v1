@@ -71,19 +71,28 @@ def ask_llm(prompt: str) -> str:
 
     payload = {
         "inputs": prompt,
-        "options": {
-            "wait_for_model": True,
-            "use_cache": True
+        "parameters": {
+            "max_new_tokens": 300,
+            "temperature": 0.3,
+            "return_full_text": False
         }
     }
 
-    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=90)
 
-    if response.status_code != 200:
-        return f"❌ HuggingFace API Error {response.status_code}: {response.text}"
+        if response.status_code != 200:
+            return f"❌ HuggingFace API Error {response.status_code}: {response.text}"
 
-    data = response.json()
-    return data[0]["generated_text"]
+        result = response.json()
+
+        if isinstance(result, list):
+            return result[0].get("generated_text", "No answer generated.")
+        else:
+            return result.get("generated_text", "No answer generated.")
+
+    except Exception as e:
+        return f"❌ API Connection Error: {str(e)}"
 
 # =============================
 # USER INPUT
@@ -139,3 +148,4 @@ Answer:
     st.subheader("📚 Evidence Sources")
     for s in sorted(set(sources)):
         st.write("•", s)
+
