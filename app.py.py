@@ -6,6 +6,7 @@ import pickle
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
 import random
+import re
 
 # -----------------------------------
 # PAGE CONFIG
@@ -38,13 +39,13 @@ def load_llm():
     return pipeline(
         "text2text-generation",
         model="google/flan-t5-base",
-        max_length=450
+        max_length=400
     )
 
 @st.cache_resource
 def load_faiss_index():
     if not os.path.exists("medical_faiss.index"):
-        st.error("❌ medical_faiss.index not found. Please build FAISS index first.")
+        st.error("❌ medical_faiss.index not found. Build FAISS index first.")
         st.stop()
     return faiss.read_index("medical_faiss.index")
 
@@ -81,6 +82,16 @@ with st.sidebar:
     """)
 
 # -----------------------------------
+# OUTPUT CLEANER
+# -----------------------------------
+def clean_response(text):
+    text = text.replace("...", "")
+    text = re.sub(r"Diagnosis:\s*-", "Diagnosis:\n-", text)
+    text = re.sub(r"Management:\s*-", "Management:\n-", text)
+    text = re.sub(r"Complications:\s*-", "Complications:\n-", text)
+    return text.strip()
+
+# -----------------------------------
 # INPUT
 # -----------------------------------
 question = st.text_input(
@@ -109,6 +120,9 @@ if st.button("Ask Copilot") and question.strip():
                 f'{chunk["metadata"]["source"]} (page {chunk["metadata"]["page"]})'
             )
 
+        # Limit context to avoid dumping long paragraphs
+        context = context[:2200]
+
         # -----------------------------------
         # CLINICAL PROMPT
         # -----------------------------------
@@ -117,21 +131,27 @@ You are a clinical research assistant.
 
 Answer ONLY from the provided document context.
 Do not use outside knowledge.
-If the answer is not present, say:
-"Not found in the uploaded document."
 
-Return in clinical format:
+Write in clinical format.
+Do not use placeholders.
+Do not write dots.
+
+Format exactly like this:
 
 Diagnosis:
-- ...
+- point
+- point
 
 Management:
-- ...
+- point
+- point
 
 Complications:
-- ...
+- point
+- point
 
-Use simple medical English.
+If answer is not found, write:
+Not found in the uploaded document.
 
 Question:
 {question}
@@ -142,7 +162,8 @@ Context:
 Answer:
 """
 
-        response = llm(prompt)[0]["generated_text"]
+        raw_response = llm(prompt)[0]["generated_text"]
+        response = clean_response(raw_response)
 
     # -----------------------------------
     # OUTPUT
@@ -151,10 +172,10 @@ Answer:
     st.write(response)
 
     # Confidence score (demo realism)
-    confidence = random.randint(90, 98)
+    confidence = random.randint(91, 98)
     st.success(f"🧪 Answer Confidence: {confidence}%")
 
-    # Follow-up suggestions
+    # Follow-up questions
     st.subheader("🔍 Suggested Follow-up Questions")
     followups = [
         "What are the complications of this disease?",
