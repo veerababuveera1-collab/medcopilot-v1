@@ -15,11 +15,11 @@ st.set_page_config(
 )
 
 st.title("🧠 MedCopilot V2 — Clinical Research Copilot")
-st.caption("Evidence-based medical Q&A (Cloud-Safe Version)")
+st.caption("Evidence-based medical Q&A (Global Standard AI)")
 st.warning("⚠ This AI system is for research support only. Not medical advice.")
 
 # =============================
-# LOAD EMBEDDING MODEL (LIGHTWEIGHT)
+# LOAD EMBEDDING MODEL
 # =============================
 @st.cache_resource
 def load_embedding_model():
@@ -45,7 +45,7 @@ index = load_faiss_index()
 chunked_docs = load_chunks()
 
 # =============================
-# LOAD API KEY (AUTO-DETECT)
+# LOAD API KEY
 # =============================
 HF_API_KEY = (
     st.secrets.get("HF_API_KEY") or
@@ -59,10 +59,10 @@ if not HF_API_KEY:
     st.stop()
 
 # =============================
-# HUGGINGFACE AI CALL (NEW ROUTER ENDPOINT)
+# GLOBAL STANDARD HUGGINGFACE ROUTER (OPENAI COMPATIBLE)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-small"
+    url = "https://router.huggingface.co/v1/chat/completions"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -70,12 +70,13 @@ def ask_llm(prompt: str) -> str:
     }
 
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 256,
-            "temperature": 0.2,
-            "return_full_text": False
-        }
+        "model": "google/flan-t5-small",
+        "messages": [
+            {"role": "system", "content": "You are a clinical research assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 300
     }
 
     try:
@@ -90,14 +91,8 @@ def ask_llm(prompt: str) -> str:
         if response.status_code != 200:
             return f"❌ AI Error {response.status_code}: {response.text}"
 
-        result = response.json()
-
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("generated_text", "No answer generated.")
-        elif isinstance(result, dict):
-            return result.get("generated_text", "No answer generated.")
-        else:
-            return "⚠ AI returned empty response."
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
 
     except requests.exceptions.Timeout:
         return "⚠ AI request timed out. Please try again."
@@ -110,7 +105,7 @@ def ask_llm(prompt: str) -> str:
 # =============================
 question = st.text_input(
     "💬 Ask a clinical research question:",
-    placeholder="Example: What are the symptoms and causes of diabetes?"
+    placeholder="Example: What are the symptoms and causes of asthma?"
 )
 
 # =============================
