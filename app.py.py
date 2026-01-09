@@ -45,11 +45,18 @@ index = load_faiss_index()
 chunked_docs = load_chunks()
 
 # =============================
-# LOAD API KEY FROM STREAMLIT SECRETS
+# LOAD API KEY (AUTO-DETECT)
 # =============================
-HF_API_KEY = st.secrets.get("HF_API_KEY", "")
+HF_API_KEY = (
+    st.secrets.get("HF_API_KEY") or
+    st.secrets.get("HF_TOKEN") or
+    os.environ.get("HF_API_KEY") or
+    os.environ.get("HF_TOKEN")
+)
 
-# Debug view (optional)
+# =============================
+# DEBUG INFO
+# =============================
 with st.expander("🔧 Debug Info"):
     st.write("Secrets loaded:", list(st.secrets.keys()))
     st.write("HF_API_KEY detected:", "YES" if HF_API_KEY else "NO")
@@ -69,13 +76,17 @@ def ask_llm(prompt: str) -> str:
         "options": {"wait_for_model": True}
     }
 
-    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
 
-    if response.status_code != 200:
-        return f"❌ HuggingFace API Error: {response.text}"
+        if response.status_code != 200:
+            return f"❌ HuggingFace API Error: {response.text}"
 
-    data = response.json()
-    return data[0]["generated_text"]
+        data = response.json()
+        return data[0]["generated_text"]
+
+    except Exception as e:
+        return f"❌ API Connection Error: {str(e)}"
 
 # =============================
 # USER INPUT
