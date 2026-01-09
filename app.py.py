@@ -59,10 +59,10 @@ if not HF_API_KEY:
     st.stop()
 
 # =============================
-# HUGGINGFACE ROUTER CHAT API
+# HUGGINGFACE TEXT GENERATION API (FREE TIER)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://router.huggingface.co/v1/chat/completions"
+    url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -70,13 +70,11 @@ def ask_llm(prompt: str) -> str:
     }
 
     payload = {
-        "model": "mistralai/Mistral-7B-Instruct-v0.2",
-        "messages": [
-            {"role": "system", "content": "You are a clinical research assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.2,
-        "max_tokens": 300
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 256,
+            "temperature": 0.2
+        }
     }
 
     try:
@@ -91,8 +89,12 @@ def ask_llm(prompt: str) -> str:
         if response.status_code != 200:
             return f"❌ AI Error {response.status_code}: {response.text}"
 
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        result = response.json()
+
+        if isinstance(result, list):
+            return result[0]["generated_text"]
+        else:
+            return result.get("generated_text", "No answer generated.")
 
     except requests.exceptions.Timeout:
         return "⚠ AI request timed out. Please try again."
