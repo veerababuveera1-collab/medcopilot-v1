@@ -55,13 +55,6 @@ HF_API_KEY = (
 )
 
 # =============================
-# DEBUG INFO
-# =============================
-with st.expander("🔧 Debug Info"):
-    st.write("Secrets loaded:", list(st.secrets.keys()))
-    st.write("HF_API_KEY detected:", "YES" if HF_API_KEY else "NO")
-
-# =============================
 # HUGGINGFACE API CALL (NEW ENDPOINT)
 # =============================
 def ask_llm(prompt: str) -> str:
