@@ -59,10 +59,10 @@ if not HF_API_KEY:
     st.stop()
 
 # =============================
-# HUGGINGFACE TEXT GENERATION API (FREE TIER)
+# HUGGINGFACE ROUTER TEXT GENERATION API (FREE TIER)
 # =============================
 def ask_llm(prompt: str) -> str:
-    url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
+    url = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
 
     headers = {
         "Authorization": f"Bearer {HF_API_KEY}",
@@ -73,7 +73,8 @@ def ask_llm(prompt: str) -> str:
         "inputs": prompt,
         "parameters": {
             "max_new_tokens": 256,
-            "temperature": 0.2
+            "temperature": 0.2,
+            "return_full_text": False
         }
     }
 
@@ -91,10 +92,12 @@ def ask_llm(prompt: str) -> str:
 
         result = response.json()
 
-        if isinstance(result, list):
-            return result[0]["generated_text"]
-        else:
+        if isinstance(result, list) and len(result) > 0:
+            return result[0].get("generated_text", "No answer generated.")
+        elif isinstance(result, dict):
             return result.get("generated_text", "No answer generated.")
+        else:
+            return "⚠ AI returned empty response."
 
     except requests.exceptions.Timeout:
         return "⚠ AI request timed out. Please try again."
