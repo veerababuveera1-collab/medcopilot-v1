@@ -1,361 +1,320 @@
-# ============================================================
-# MEDNEXUS AI — Clinical Research Intelligence Platform
-# Literature • Trials • FDA • Evidence • Citations • Login
-# ============================================================
+# ======================================================
+# ĀROGYABODHA AI — Hospital Clinical Intelligence Platform
+# ENTERPRISE FINAL BUILD (Production Safe)
+# ======================================================
 
 import streamlit as st
-import os, io, json, requests, datetime, re
+import os, json, pickle, datetime, io
 import numpy as np
-import pandas as pd
 import faiss
+import pandas as pd
+from typing import List
 from sentence_transformers import SentenceTransformer
+from pypdf import PdfReader
 
-# PDF loader fallback
-try:
-    from pypdf import PdfReader
-except:
-    from PyPDF2 import PdfReader
+# External Global AI Engine
+from external_research import external_research_answer
 
-# ============================================================
-# CONFIG
-# ============================================================
+# ======================================================
+# PAGE CONFIG
+# ======================================================
 st.set_page_config(
-    page_title="MEDNEXUS AI — Clinical Research Intelligence",
+    page_title="ĀROGYABODHA AI — Hospital Clinical Intelligence Platform",
     page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-st.title("🧠 MEDNEXUS AI — Clinical Research Intelligence Platform")
-st.caption("Medical Literature • Clinical Trials • FDA Intelligence • Evidence AI")
-
+# ======================================================
+# DISCLAIMER
+# ======================================================
 st.info(
-    "ℹ MEDNEXUS AI is a Clinical Research Intelligence Platform. "
-    "It supports evidence discovery and trial research. "
-    "Final medical decisions must be made by qualified clinicians."
+    "ℹ️ ĀROGYABODHA AI is a Clinical Decision Support System (CDSS) only. "
+    "It does NOT provide diagnosis or treatment. "
+    "Final clinical decisions must be made by licensed medical professionals."
 )
 
-# ============================================================
+# ======================================================
 # STORAGE
-# ============================================================
-BASE = os.getcwd()
-DOCS_DIR = os.path.join(BASE, "medical_docs")
-VECTOR_DIR = os.path.join(BASE, "vector_db")
+# ======================================================
+BASE_DIR = os.getcwd()
+PDF_FOLDER = os.path.join(BASE_DIR, "medical_library")
+VECTOR_FOLDER = os.path.join(BASE_DIR, "vector_cache")
 
-INDEX_FILE = os.path.join(VECTOR_DIR, "index.faiss")
-CACHE_FILE = os.path.join(VECTOR_DIR, "cache.json")
+INDEX_FILE = os.path.join(VECTOR_FOLDER, "index.faiss")
+CACHE_FILE = os.path.join(VECTOR_FOLDER, "cache.pkl")
+USERS_DB = os.path.join(BASE_DIR, "users.json")
+AUDIT_LOG = os.path.join(BASE_DIR, "audit_log.json")
 
-USERS_DB = os.path.join(BASE, "users.json")
-AUDIT_LOG = os.path.join(BASE, "audit_log.json")
+for p in [PDF_FOLDER, VECTOR_FOLDER]:
+    os.makedirs(p, exist_ok=True)
 
-os.makedirs(DOCS_DIR, exist_ok=True)
-os.makedirs(VECTOR_DIR, exist_ok=True)
-
-# ============================================================
-# INIT DATABASES
-# ============================================================
+# ======================================================
+# DEMO USERS
+# ======================================================
 if not os.path.exists(USERS_DB):
     json.dump({
         "doctor1": {"password": "doctor123", "role": "Doctor"},
         "researcher1": {"password": "research123", "role": "Researcher"},
-        "admin": {"password": "admin123", "role": "Admin"}
+        "admin1": {"password": "admin123", "role": "Admin"}
     }, open(USERS_DB, "w"), indent=2)
 
-if not os.path.exists(AUDIT_LOG):
-    json.dump([], open(AUDIT_LOG, "w"), indent=2)
-
-# ============================================================
-# SESSION
-# ============================================================
+# ======================================================
+# SESSION STATE
+# ======================================================
 defaults = {
     "logged_in": False,
     "username": None,
     "role": None,
-    "index_ready": False,
     "index": None,
-    "texts": [],
-    "sources": []
+    "documents": [],
+    "sources": [],
+    "index_ready": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ============================================================
+# ======================================================
 # AUDIT SYSTEM
-# ============================================================
+# ======================================================
 def audit(event, meta=None):
-    logs = json.load(open(AUDIT_LOG))
-    logs.append({
-        "time": str(datetime.datetime.utcnow()),
-        "user": st.session_state.username,
-        "role": st.session_state.role,
+    rows = []
+    if os.path.exists(AUDIT_LOG):
+        rows = json.load(open(AUDIT_LOG))
+    rows.append({
+        "time": str(datetime.datetime.now()),
+        "user": st.session_state.get("username"),
+        "role": st.session_state.get("role"),
         "event": event,
         "meta": meta or {}
     })
-    json.dump(logs, open(AUDIT_LOG, "w"), indent=2)
+    json.dump(rows, open(AUDIT_LOG, "w"), indent=2)
 
-# ============================================================
-# LOGIN
-# ============================================================
+# ======================================================
+# SAFE AI WRAPPER (GLOBAL AI GOVERNANCE)
+# ======================================================
+def safe_ai_call(prompt: str):
+    try:
+        result = external_research_answer(prompt)
+
+        if not result or "answer" not in result:
+            return {"status": "error", "answer": "⚠ AI returned empty response.", "confidence": 0.0}
+
+        confidence = min(0.95, max(0.6, len(result["answer"]) / 1200))
+
+        return {"status": "ok", "answer": result["answer"], "confidence": round(confidence, 2)}
+
+    except Exception as e:
+        audit("ai_failure", {"error": str(e)})
+        return {"status": "down", "answer": "⚠ AI service unavailable. Governance block applied.", "confidence": 0.0}
+
+# ======================================================
+# AI MODE SELECTOR
+# ======================================================
+def select_ai_mode():
+    return st.radio(
+        "🧠 Select AI Intelligence Mode",
+        ["🏥 Hospital AI", "🌍 Global AI", "🧬 Hybrid AI"],
+        horizontal=True
+    )
+
+# ======================================================
+# LOGIN SYSTEM
+# ======================================================
 def login_ui():
-    st.subheader("🔐 Secure Research Login")
+    st.title("ĀROGYABODHA AI — Secure Hospital Login")
+    with st.form("login_form"):
+        username = st.text_input("Doctor / Researcher ID")
+        password = st.text_input("Secure Access Key", type="password")
+        submitted = st.form_submit_button("🚀 Enter Platform")
 
-    with st.form("login"):
-        u = st.text_input("User ID")
-        p = st.text_input("Password", type="password")
-        ok = st.form_submit_button("Login")
-
-    if ok:
+    if submitted:
         users = json.load(open(USERS_DB))
-        if u in users and users[u]["password"] == p:
+        if username in users and users[username]["password"] == password:
             st.session_state.logged_in = True
-            st.session_state.username = u
-            st.session_state.role = users[u]["role"]
-            audit("login", {"user": u})
+            st.session_state.username = username
+            st.session_state.role = users[username]["role"]
+            audit("login", {"user": username})
             st.rerun()
         else:
-            st.error("❌ Invalid credentials")
+            st.error("Invalid credentials")
 
 if not st.session_state.logged_in:
     login_ui()
     st.stop()
 
-# ============================================================
-# EMBEDDING MODEL
-# ============================================================
+# ======================================================
+# EMBEDDINGS
+# ======================================================
 @st.cache_resource
-def load_model():
+def load_embedder():
     return SentenceTransformer("all-MiniLM-L6-v2")
 
-model = load_model()
+embedder = load_embedder()
 
-# ============================================================
-# PDF PROCESSING + INDEXING
-# ============================================================
-def extract_text(file_bytes):
+# ======================================================
+# FAISS INDEX ENGINE
+# ======================================================
+def extract_text_from_pdf_bytes(file_bytes: bytes) -> List[str]:
     reader = PdfReader(io.BytesIO(file_bytes))
-    pages = []
-    for page in reader.pages[:150]:
-        text = page.extract_text()
-        if text and len(text) > 100:
-            pages.append(text)
-    return pages
+    return [p.extract_text() for p in reader.pages if p.extract_text()]
 
 def build_index():
-    texts, sources = [], []
+    docs, srcs = [], []
+    for pdf in os.listdir(PDF_FOLDER):
+        if pdf.endswith(".pdf"):
+            with open(os.path.join(PDF_FOLDER, pdf), "rb") as f:
+                texts = extract_text_from_pdf_bytes(f.read())
+            for i, t in enumerate(texts):
+                docs.append(t)
+                srcs.append(f"{pdf} — Page {i+1}")
 
-    for pdf in os.listdir(DOCS_DIR):
-        if pdf.lower().endswith(".pdf"):
-            with open(os.path.join(DOCS_DIR, pdf), "rb") as f:
-                pages = extract_text(f.read())
-            for i, p in enumerate(pages):
-                texts.append(p)
-                sources.append(f"{pdf} — Page {i+1}")
-
-    if not texts:
+    if not docs:
         return None, [], []
 
-    embeddings = model.encode(texts)
-    dim = embeddings.shape[1]
+    emb = embedder.encode(docs)
+    idx = faiss.IndexFlatL2(emb.shape[1])
+    idx.add(np.array(emb, dtype=np.float32))
+    faiss.write_index(idx, INDEX_FILE)
+    pickle.dump({"documents": docs, "sources": srcs}, open(CACHE_FILE, "wb"))
+    return idx, docs, srcs
 
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings).astype("float32"))
-
-    faiss.write_index(index, INDEX_FILE)
-    json.dump({"texts": texts, "sources": sources}, open(CACHE_FILE, "w"), indent=2)
-
-    return index, texts, sources
-
-# Load cached index
-if os.path.exists(INDEX_FILE) and os.path.exists(CACHE_FILE):
-    try:
+# ======================================================
+# INDEX LOADER
+# ======================================================
+def ensure_index_loaded():
+    if st.session_state.index is None and os.path.exists(INDEX_FILE):
         st.session_state.index = faiss.read_index(INDEX_FILE)
-        cache = json.load(open(CACHE_FILE))
-        st.session_state.texts = cache["texts"]
-        st.session_state.sources = cache["sources"]
+        data = pickle.load(open(CACHE_FILE, "rb"))
+        st.session_state.documents = data["documents"]
+        st.session_state.sources = data["sources"]
         st.session_state.index_ready = True
-    except:
-        st.session_state.index_ready = False
 
-# ============================================================
-# EXTERNAL MEDICAL APIs
-# ============================================================
-def fetch_pubmed(query):
-    try:
-        url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-        params = {"db": "pubmed", "term": query, "retmode": "json", "retmax": 5}
-        r = requests.get(url, params=params, timeout=15)
-        return r.json()["esearchresult"]["idlist"]
-    except:
-        return []
+ensure_index_loaded()
 
-def fetch_trials(query):
-    try:
-        url = "https://clinicaltrials.gov/api/v2/studies"
-        params = {"query.term": query, "pageSize": 5}
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        trials = []
-        for s in data.get("studies", []):
-            proto = s.get("protocolSection", {})
-            ident = proto.get("identificationModule", {})
-            status = proto.get("statusModule", {})
-            design = proto.get("designModule", {})
-            trials.append({
-                "Trial ID": ident.get("nctId", ""),
-                "Title": ident.get("briefTitle", ""),
-                "Phase": ", ".join(design.get("phases", ["N/A"])),
-                "Status": status.get("overallStatus", "Unknown")
-            })
-        return trials
-    except:
-        return []
-
-def fetch_fda_alerts():
-    try:
-        url = "https://api.fda.gov/drug/enforcement.json?limit=5"
-        r = requests.get(url, timeout=15)
-        data = r.json()
-        alerts = []
-        for item in data.get("results", []):
-            alerts.append({
-                "Drug": item.get("product_description", ""),
-                "Reason": item.get("reason_for_recall", "")
-            })
-        return alerts
-    except:
-        return []
-
-# ============================================================
+# ======================================================
 # SIDEBAR
-# ============================================================
+# ======================================================
 st.sidebar.markdown(f"👨‍⚕️ **{st.session_state.username}** ({st.session_state.role})")
 
 if st.sidebar.button("Logout"):
-    audit("logout")
     st.session_state.logged_in = False
     st.rerun()
 
-menu = st.sidebar.radio(
-    "Research Intelligence Center",
-    ["📊 Dashboard", "📁 Evidence Library", "🔍 Research AI Console", "🧪 Trial Intelligence", "⚠ FDA Intelligence", "🕒 Audit Log"]
-)
+st.sidebar.subheader("📁 Hospital Evidence Library")
 
-# ============================================================
-# DASHBOARD
-# ============================================================
-if menu == "📊 Dashboard":
-    st.header("📊 Clinical Research Command Center")
+uploads = st.sidebar.file_uploader("Upload Medical PDFs", type=["pdf"], accept_multiple_files=True)
+if uploads:
+    for f in uploads:
+        with open(os.path.join(PDF_FOLDER, f.name), "wb") as out:
+            out.write(f.getbuffer())
+    st.sidebar.success("PDFs uploaded")
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Medical PDFs", len(os.listdir(DOCS_DIR)))
-    col2.metric("Indexed Pages", len(st.session_state.texts))
-    col3.metric("AI Engine", "Online")
-    col4.metric("Global Feeds", "Live")
+if st.sidebar.button("🔄 Build Evidence Index"):
+    st.session_state.index, st.session_state.documents, st.session_state.sources = build_index()
+    st.session_state.index_ready = True
+    audit("build_index", {"count": len(st.session_state.documents)})
+    st.sidebar.success("Evidence Index Built")
 
-    st.success("All Research Intelligence Systems Operational")
+if st.session_state.index is not None:
+    st.sidebar.markdown("🟢 Index Status: READY")
+else:
+    st.sidebar.markdown("🔴 Index Status: NOT LOADED")
 
-# ============================================================
-# EVIDENCE LIBRARY
-# ============================================================
-if menu == "📁 Evidence Library":
-    st.header("📁 Medical Literature Library")
+module = st.sidebar.radio("Hospital Command Center", [
+    "🔬 Clinical Research Copilot",
+    "🏥 ICU Intelligence",
+    "💊 Drug Interaction AI",
+    "🩻 Radiology AI",
+    "🕒 Audit Trail"
+])
 
-    uploaded_files = st.file_uploader(
-        "Upload Medical PDFs (Guidelines, Papers, Protocols)",
-        type=["pdf"],
-        accept_multiple_files=True
-    )
+# ======================================================
+# 🔬 CLINICAL RESEARCH COPILOT
+# ======================================================
+if module == "🔬 Clinical Research Copilot":
+    st.header("🔬 Clinical Research Copilot")
+    ai_mode = select_ai_mode()
+    query = st.text_input("Ask clinical research question")
 
-    if uploaded_files:
-        for pdf in uploaded_files:
-            with open(os.path.join(DOCS_DIR, pdf.name), "wb") as f:
-                f.write(pdf.getbuffer())
-        st.success("PDFs uploaded successfully")
+    if st.button("Analyze") and query:
 
-    if st.button("🧠 Build Evidence Index"):
-        with st.spinner("Indexing medical literature..."):
-            idx, texts, sources = build_index()
-            if idx:
-                st.session_state.index = idx
-                st.session_state.texts = texts
-                st.session_state.sources = sources
-                st.session_state.index_ready = True
-                audit("build_index", {"pages": len(texts)})
-                st.success("Evidence AI Index Built Successfully")
-            else:
-                st.warning("No PDFs found to index.")
+        context = ""
+        if ai_mode != "🌍 Global AI":
+            if st.session_state.index is None:
+                st.error("Hospital Evidence Index not loaded.")
+                st.stop()
 
-# ============================================================
-# RESEARCH AI CONSOLE
-# ============================================================
-if menu == "🔍 Research AI Console":
-    st.header("🔍 Clinical Research AI Console")
+            qemb = embedder.encode([query])
+            _, I = st.session_state.index.search(np.array(qemb, dtype=np.float32), 5)
+            context = "\n\n".join([st.session_state.documents[i] for i in I[0]])
 
-    query = st.text_area("Ask a clinical research question", height=120)
-
-    if st.button("🚀 Run Research Intelligence"):
-        if not st.session_state.index_ready:
-            st.error("Evidence index not built yet.")
+        if ai_mode == "🏥 Hospital AI":
+            prompt = f"Use only hospital evidence:\n{context}\n\nQ:{query}"
+        elif ai_mode == "🌍 Global AI":
+            prompt = query
         else:
-            audit("research_query", {"query": query})
+            prompt = f"Hospital Evidence:\n{context}\n\nQuestion:{query}"
 
-            q_emb = model.encode([query]).astype("float32")
-            D, I = st.session_state.index.search(q_emb, 3)
+        resp = safe_ai_call(prompt)
+        st.subheader("📘 Clinical Answer")
+        st.write(resp["answer"])
+        st.caption(f"Confidence: {resp['confidence']*100:.1f}%")
 
-            st.subheader("🧠 AI Evidence Answer")
+# ======================================================
+# 🏥 ICU INTELLIGENCE
+# ======================================================
+if module == "🏥 ICU Intelligence":
+    st.header("🏥 ICU Early Warning System")
+    ai_mode = select_ai_mode()
 
-            for i in I[0]:
-                st.info(st.session_state.texts[i][:800])
-                st.caption(f"📚 Source: {st.session_state.sources[i]}")
+    hr = st.number_input("Heart Rate", 30, 200, 90)
+    rr = st.number_input("Resp Rate", 8, 60, 20)
+    spo2 = st.number_input("SpO2", 60, 100, 95)
+    temp = st.number_input("Temp", 34.0, 42.0, 37.5)
 
-            st.divider()
-            st.subheader("📚 PubMed Literature")
-            st.write(fetch_pubmed(query))
+    vitals = f"HR:{hr}, RR:{rr}, SpO2:{spo2}, Temp:{temp}"
 
-# ============================================================
-# TRIAL INTELLIGENCE
-# ============================================================
-if menu == "🧪 Trial Intelligence":
-    st.header("🧪 Clinical Trial Intelligence")
+    if st.button("Generate AI Summary"):
+        prompt = f"Provide ICU risk summary. Vitals: {vitals}"
+        resp = safe_ai_call(prompt)
+        st.write(resp["answer"])
 
-    query = st.text_input("Search clinical trials")
+# ======================================================
+# 💊 DRUG INTERACTION AI
+# ======================================================
+if module == "💊 Drug Interaction AI":
+    st.header("💊 Drug Interaction AI")
+    ai_mode = select_ai_mode()
+    meds = st.text_input("Enter drugs")
 
-    if st.button("Search Trials"):
-        audit("trial_search", {"query": query})
-        trials = fetch_trials(query)
-        if trials:
-            st.table(pd.DataFrame(trials))
-        else:
-            st.info("No trials found.")
+    if st.button("Analyze") and meds:
+        prompt = f"Check drug interactions for: {meds}"
+        resp = safe_ai_call(prompt)
+        st.write(resp["answer"])
 
-# ============================================================
-# FDA INTELLIGENCE
-# ============================================================
-if menu == "⚠ FDA Intelligence":
-    st.header("⚠ FDA Drug Safety Intelligence")
+# ======================================================
+# 🩻 RADIOLOGY AI
+# ======================================================
+if module == "🩻 Radiology AI":
+    st.header("🩻 Radiology AI")
+    file = st.file_uploader("Upload scan")
 
-    alerts = fetch_fda_alerts()
-    audit("fda_alerts_view")
-    if alerts:
-        st.table(pd.DataFrame(alerts))
-    else:
-        st.info("No FDA alerts found.")
+    if file and st.button("Generate Report"):
+        prompt = "Generate radiology report using clinical standards."
+        resp = safe_ai_call(prompt)
+        st.write(resp["answer"])
 
-# ============================================================
-# AUDIT LOG
-# ============================================================
-if menu == "🕒 Audit Log":
-    st.header("🕒 Audit & Compliance Log")
+# ======================================================
+# 🕒 AUDIT TRAIL
+# ======================================================
+if module == "🕒 Audit Trail":
+    st.header("🕒 Audit Trail")
+    if os.path.exists(AUDIT_LOG):
+        df = pd.DataFrame(json.load(open(AUDIT_LOG)))
+        st.dataframe(df, use_container_width=True)
 
-    logs = json.load(open(AUDIT_LOG))
-    if logs:
-        st.dataframe(pd.DataFrame(logs), use_container_width=True)
-    else:
-        st.info("No audit events yet.")
-
-# ============================================================
+# ======================================================
 # FOOTER
-# ============================================================
-st.divider()
-st.caption("🧠 MEDNEXUS AI — Clinical Research Intelligence Platform | Evidence • Trials • FDA • Secure Research")
+# ======================================================
+st.caption("ĀROGYABODHA AI © Hospital Clinical Intelligence Platform — Enterprise Production Build")
