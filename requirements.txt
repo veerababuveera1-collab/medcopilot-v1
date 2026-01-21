@@ -1,7 +1,8 @@
 streamlit
-faiss-cpu
 sentence-transformers
+faiss-cpu
 pypdf
 numpy
 pandas
 requests
+reportlab
