@@ -1,7 +1,7 @@
 streamlit
-sentence-transformers
 faiss-cpu
+sentence-transformers
+pypdf
 numpy
+pandas
 requests
-plotly
-pickle-mixin
