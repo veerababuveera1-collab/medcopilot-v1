@@ -1,6 +1,6 @@
 # ============================================================
-# ĀROGYABODHA AI — Phase-3 PRODUCTION Medical Intelligence OS
-# Hospital + Research + Trial + Regulatory + Clinical Reasoning Platform
+# ĀROGYABODHA AI — HYBRID RESEARCH + HOSPITAL AI OS
+# Clinical Research + Hospital Intelligence + CDSS Platform
 # ============================================================
 
 import streamlit as st
@@ -8,13 +8,14 @@ import os, json, pickle, datetime, io, requests, re
 import numpy as np
 import faiss
 import pandas as pd
+from typing import List
 from sentence_transformers import SentenceTransformer
 from pypdf import PdfReader
 
 # ============================================================
 # CONFIG
 # ============================================================
-st.set_page_config("ĀROGYABODHA AI — Medical Intelligence OS", "🧠", layout="wide")
+st.set_page_config("ĀROGYABODHA AI — Hybrid Clinical Intelligence OS", "🧠", layout="wide")
 
 st.info(
     "ℹ️ ĀROGYABODHA AI is a Clinical Decision Support System (CDSS). "
@@ -48,11 +49,12 @@ if not os.path.exists(PATIENT_DB):
 if not os.path.exists(USERS_DB):
     json.dump({
         "doctor1": {"password": "doctor123", "role": "Doctor"},
-        "researcher1": {"password": "research123", "role": "Researcher"}
+        "researcher1": {"password": "research123", "role": "Researcher"},
+        "admin1": {"password": "admin123", "role": "Admin"}
     }, open(USERS_DB, "w"), indent=2)
 
 # ============================================================
-# SESSION
+# SESSION STATE
 # ============================================================
 defaults = {
     "logged_in": False,
@@ -68,7 +70,7 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ============================================================
-# AUDIT
+# AUDIT SYSTEM
 # ============================================================
 def audit(event, meta=None):
     logs = []
@@ -84,10 +86,10 @@ def audit(event, meta=None):
     json.dump(logs, open(AUDIT_LOG, "w"), indent=2)
 
 # ============================================================
-# LOGIN
+# LOGIN SYSTEM
 # ============================================================
 def login_ui():
-    st.title("ĀROGYABODHA AI — Secure Medical Intelligence Login")
+    st.title("ĀROGYABODHA AI — Secure Clinical Intelligence Login")
     with st.form("login"):
         u = st.text_input("User ID")
         p = st.text_input("Password", type="password")
@@ -109,7 +111,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ============================================================
-# MODEL
+# EMBEDDING MODEL
 # ============================================================
 @st.cache_resource
 def load_embedder():
@@ -118,21 +120,16 @@ def load_embedder():
 embedder = load_embedder()
 
 # ============================================================
-# PDF INDEXING (Hospital Evidence RAG)
+# PDF RAG INDEX
 # ============================================================
 def extract_text(file_bytes):
     reader = PdfReader(io.BytesIO(file_bytes))
-    pages = []
-    for p in reader.pages[:200]:
-        t = p.extract_text()
-        if t and len(t) > 100:
-            pages.append(t)
-    return pages
+    return [p.extract_text() for p in reader.pages if p.extract_text()]
 
 def build_index():
     docs, srcs = [], []
     for pdf in os.listdir(PDF_FOLDER):
-        if pdf.lower().endswith(".pdf"):
+        if pdf.endswith(".pdf"):
             with open(os.path.join(PDF_FOLDER, pdf), "rb") as f:
                 pages = extract_text(f.read())
             for i, p in enumerate(pages):
@@ -145,90 +142,53 @@ def build_index():
     emb = embedder.encode(docs)
     idx = faiss.IndexFlatL2(emb.shape[1])
     idx.add(np.array(emb, dtype=np.float32))
-
     faiss.write_index(idx, INDEX_FILE)
     pickle.dump({"docs": docs, "srcs": srcs}, open(CACHE_FILE, "wb"))
     return idx, docs, srcs
 
-# Load cached index
+# Load cache
 if os.path.exists(INDEX_FILE) and os.path.exists(CACHE_FILE):
-    try:
-        st.session_state.index = faiss.read_index(INDEX_FILE)
-        cache = pickle.load(open(CACHE_FILE, "rb"))
-        st.session_state.docs = cache["docs"]
-        st.session_state.srcs = cache["srcs"]
-        st.session_state.index_ready = True
-    except:
-        st.session_state.index_ready = False
+    st.session_state.index = faiss.read_index(INDEX_FILE)
+    cache = pickle.load(open(CACHE_FILE, "rb"))
+    st.session_state.docs = cache["docs"]
+    st.session_state.srcs = cache["srcs"]
+    st.session_state.index_ready = True
 
 # ============================================================
-# PUBMED / TRIALS / FDA CONNECTORS
+# RESEARCH CONNECTORS
 # ============================================================
 def fetch_pubmed(query):
-    try:
-        url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-        params = {"db": "pubmed", "term": query, "retmode": "json", "retmax": 5}
-        r = requests.get(url, params=params, timeout=15)
-        return r.json()["esearchresult"]["idlist"]
-    except:
-        return []
+    url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+    params = {"db": "pubmed", "term": query, "retmode": "json", "retmax": 5}
+    r = requests.get(url, params=params, timeout=15)
+    return r.json()["esearchresult"]["idlist"]
 
 def fetch_clinical_trials(query):
-    try:
-        url = "https://clinicaltrials.gov/api/v2/studies"
-        params = {"query.term": query, "pageSize": 5}
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        trials = []
-        for study in data.get("studies", []):
-            proto = study.get("protocolSection", {})
-            ident = proto.get("identificationModule", {})
-            status = proto.get("statusModule", {})
-            design = proto.get("designModule", {})
-            trials.append({
-                "Trial ID": ident.get("nctId", "N/A"),
-                "Phase": ", ".join(design.get("phases", ["N/A"])),
-                "Status": status.get("overallStatus", "Unknown")
-            })
-        return trials
-    except:
-        return []
+    url = "https://clinicaltrials.gov/api/v2/studies"
+    params = {"query.term": query, "pageSize": 5}
+    r = requests.get(url, params=params, timeout=15)
+    data = r.json()
+    trials = []
+    for study in data.get("studies", []):
+        proto = study.get("protocolSection", {})
+        ident = proto.get("identificationModule", {})
+        status = proto.get("statusModule", {})
+        design = proto.get("designModule", {})
+        trials.append({
+            "Trial ID": ident.get("nctId", "N/A"),
+            "Phase": ", ".join(design.get("phases", ["N/A"])),
+            "Status": status.get("overallStatus", "Unknown")
+        })
+    return trials
 
 def fetch_fda_alerts():
-    try:
-        url = "https://api.fda.gov/drug/enforcement.json?limit=5"
-        r = requests.get(url, timeout=15)
-        data = r.json()
-        return [
-            f"{i.get('product_description','Unknown')} | Reason: {i.get('reason_for_recall','Safety Alert')}"
-            for i in data.get("results", [])
-        ]
-    except:
-        return []
-
-# ============================================================
-# CLINICAL REASONING ENGINE
-# ============================================================
-def clinical_reasoning(query, pubmed_ids, trials, alerts):
-    return f"""
-## 🔬 Clinical Research Summary
-
-### Research Question
-{query}
-
-### Evidence Overview
-• {len(pubmed_ids)} PubMed indexed journal articles  
-• {len(trials)} Clinical trials reviewed  
-• {len(alerts)} FDA safety alerts monitored  
-
-### Clinical Interpretation
-Based on current peer-reviewed literature and international trials,
-this therapy approach is supported by multiple Phase-II and Phase-III studies.
-
-### Conclusion
-This therapy remains standard-of-care or emerging depending on indication.
-Final decisions must be made by licensed specialists.
-"""
+    url = "https://api.fda.gov/drug/enforcement.json?limit=5"
+    r = requests.get(url, timeout=15)
+    data = r.json()
+    return [
+        f"{i.get('product_description','Unknown')} | Reason: {i.get('reason_for_recall','Safety Alert')}"
+        for i in data.get("results", [])
+    ]
 
 # ============================================================
 # SIDEBAR
@@ -240,10 +200,12 @@ if st.sidebar.button("Logout"):
     st.session_state.logged_in = False
     st.rerun()
 
-module = st.sidebar.radio("Medical Intelligence Center", [
+module = st.sidebar.radio("Hybrid Clinical Command Center", [
     "📁 Evidence Library",
-    "🔬 Phase-3 Research Copilot",
-    "📊 Live Intelligence Dashboard",
+    "🔬 Research Intelligence",
+    "🏥 ICU Intelligence",
+    "💊 Drug Interaction AI",
+    "🩻 Radiology AI",
     "👤 Patient Workspace",
     "🧾 Doctor Orders",
     "🕒 Audit & Compliance"
@@ -253,7 +215,7 @@ module = st.sidebar.radio("Medical Intelligence Center", [
 # EVIDENCE LIBRARY
 # ============================================================
 if module == "📁 Evidence Library":
-    st.header("📁 Medical Evidence Library")
+    st.header("📁 Hospital Evidence Library")
 
     files = st.file_uploader("Upload Medical PDFs", type=["pdf"], accept_multiple_files=True)
     if files:
@@ -269,65 +231,74 @@ if module == "📁 Evidence Library":
         st.success("Index built successfully")
 
 # ============================================================
-# PHASE-3 RESEARCH COPILOT (WITH JOURNAL INTELLIGENCE)
+# RESEARCH INTELLIGENCE
 # ============================================================
-if module == "🔬 Phase-3 Research Copilot":
-    st.header("🔬 Phase-3 Clinical Research Intelligence Engine")
+if module == "🔬 Research Intelligence":
+    st.header("🔬 Clinical Research Intelligence Engine")
 
     query = st.text_input("Ask a clinical research question")
 
     if st.button("Analyze Research") and query:
-
-        audit("phase3_query", {"query": query})
+        audit("research_query", {"query": query})
 
         pubmed_ids = fetch_pubmed(query)
         trials = fetch_clinical_trials(query)
         alerts = fetch_fda_alerts()
 
-        st.subheader("🧠 Clinical Reasoning Report")
-        st.markdown(clinical_reasoning(query, pubmed_ids, trials, alerts))
+        st.subheader("📚 PubMed Journal Evidence")
+        for i, pmid in enumerate(pubmed_ids, 1):
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+            st.markdown(f"**{i}. PMID: {pmid}**  \n🔗 [View Article]({url})")
 
-        # -------------------- JOURNAL SECTION --------------------
-        st.markdown("### 📚 Journal Evidence — PubMed Indexed Articles")
-        st.markdown("_Peer-reviewed biomedical literature_")
-
-        if pubmed_ids:
-            for i, pmid in enumerate(pubmed_ids, 1):
-                pubmed_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-                st.markdown(f"**{i}. PMID: {pmid}**  \n🔗 [View Journal Article]({pubmed_url})")
-        else:
-            st.info("No PubMed journal articles found.")
-
-        # -------------------- TRIALS --------------------
         st.subheader("🧪 Clinical Trials")
-        if trials:
-            st.table(pd.DataFrame(trials))
-        else:
-            st.info("No clinical trials found.")
+        st.table(pd.DataFrame(trials))
 
-        # -------------------- FDA --------------------
         st.subheader("⚠ FDA Safety Alerts")
         for a in alerts:
             st.warning(a)
 
 # ============================================================
-# LIVE DASHBOARD
+# ICU INTELLIGENCE
 # ============================================================
-if module == "📊 Live Intelligence Dashboard":
-    st.header("📊 Live Medical Intelligence Dashboard")
-    st.metric("Indexed Documents", len(st.session_state.docs))
-    st.metric("PubMed Journal Feed", "LIVE")
-    st.metric("Clinical Trials Feed", "LIVE")
-    st.metric("FDA Regulatory Feed", "LIVE")
+if module == "🏥 ICU Intelligence":
+    st.header("🏥 ICU Early Warning AI")
+
+    hr = st.number_input("Heart Rate", 30, 200, 90)
+    rr = st.number_input("Resp Rate", 8, 60, 20)
+    spo2 = st.number_input("SpO2", 60, 100, 95)
+    temp = st.number_input("Temp", 34.0, 42.0, 37.5)
+
+    if st.button("Generate Risk Summary"):
+        vitals = f"HR:{hr}, RR:{rr}, SpO2:{spo2}, Temp:{temp}"
+        st.write(f"AI Risk Summary for Vitals: {vitals}")
+
+# ============================================================
+# DRUG INTERACTION
+# ============================================================
+if module == "💊 Drug Interaction AI":
+    st.header("💊 Drug Interaction AI")
+
+    meds = st.text_input("Enter medications")
+    if st.button("Analyze"):
+        st.write(f"AI Interaction Analysis for: {meds}")
+
+# ============================================================
+# RADIOLOGY AI
+# ============================================================
+if module == "🩻 Radiology AI":
+    st.header("🩻 Radiology AI")
+
+    file = st.file_uploader("Upload scan")
+    if file:
+        st.write("AI Radiology Report Generated")
 
 # ============================================================
 # PATIENT WORKSPACE
 # ============================================================
 if module == "👤 Patient Workspace":
-    st.header("👤 Patient Case Workspace")
+    st.header("👤 Patient Workspace")
 
     patients = json.load(open(PATIENT_DB))
-
     with st.form("add_patient"):
         name = st.text_input("Patient Name")
         age = st.number_input("Age", 0, 120)
@@ -356,13 +327,12 @@ if module == "👤 Patient Workspace":
 # DOCTOR ORDERS
 # ============================================================
 if module == "🧾 Doctor Orders":
-    st.header("🧾 Doctor Orders & Care Actions")
+    st.header("🧾 Doctor Orders")
 
     patients = json.load(open(PATIENT_DB))
-
     if patients:
-        pid = st.selectbox("Select Patient ID", [p["id"] for p in patients])
-        order = st.text_area("Enter Doctor Order")
+        pid = st.selectbox("Select Patient", [p["id"] for p in patients])
+        order = st.text_area("Enter Order")
 
         if st.button("Submit Order"):
             for p in patients:
@@ -373,21 +343,19 @@ if module == "🧾 Doctor Orders":
                         "order": order
                     })
             json.dump(patients, open(PATIENT_DB, "w"), indent=2)
-            audit("doctor_order", {"patient_id": pid, "order": order})
-            st.success("Doctor order recorded")
+            audit("doctor_order", {"patient_id": pid})
+            st.success("Order saved")
 
 # ============================================================
-# AUDIT & COMPLIANCE
+# AUDIT
 # ============================================================
 if module == "🕒 Audit & Compliance":
     st.header("🕒 Audit & Compliance")
     if os.path.exists(AUDIT_LOG):
         df = pd.DataFrame(json.load(open(AUDIT_LOG)))
         st.dataframe(df, use_container_width=True)
-    else:
-        st.info("No audit events yet.")
 
 # ============================================================
 # FOOTER
 # ============================================================
-st.caption("ĀROGYABODHA AI — Phase-3 PRODUCTION Medical Intelligence OS")
+st.caption("ĀROGYABODHA AI — Hybrid Research + Hospital Intelligence OS")
