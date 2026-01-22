@@ -1,13 +1,4 @@
-# ============================================================
-# MEDINTEL AI — Enterprise Clinical Research Intelligence Engine
-# Author: Veera Babu
-# Backend: FastAPI + JWT + RBAC + Audit + RAG
-# ============================================================
-
-import os
-import shutil
-import uuid
-import json
+import os, shutil, uuid, json
 from datetime import datetime, timedelta
 from typing import List
 
@@ -26,11 +17,8 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 
-# ============================================================
-# CONFIG
-# ============================================================
-
-SECRET_KEY = "MEDINTEL_SECRET_KEY_CHANGE_IN_PROD"
+# ---------------- CONFIG ----------------
+SECRET_KEY = "MEDINTEL_SECRET_KEY"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
@@ -43,16 +31,10 @@ AUDIT_DB = "sqlite:///./audit.db"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(DB_DIR, exist_ok=True)
 
-# ============================================================
-# FASTAPI
-# ============================================================
-
+# ---------------- APP ----------------
 app = FastAPI(title="MEDINTEL AI Enterprise Backend", version="1.0")
 
-# ============================================================
-# SECURITY
-# ============================================================
-
+# ---------------- SECURITY ----------------
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -67,27 +49,13 @@ def create_access_token(data: dict):
     data.update({"exp": expire})
     return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
-# ============================================================
-# USERS (Replace with LDAP later)
-# ============================================================
-
+# ---------------- USERS ----------------
 USERS = {
-    "admin": {
-        "username": "admin",
-        "password": hash_password("admin123"),
-        "role": "ADMIN"
-    },
-    "doctor": {
-        "username": "doctor",
-        "password": hash_password("doctor123"),
-        "role": "REVIEWER"
-    }
+    "admin": {"password": hash_password("admin123"), "role": "ADMIN"},
+    "doctor": {"password": hash_password("doctor123"), "role": "REVIEWER"}
 }
 
-# ============================================================
-# DATABASE (AUDIT TRAIL)
-# ============================================================
-
+# ---------------- DATABASE (AUDIT) ----------------
 engine = create_engine(AUDIT_DB, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
@@ -103,19 +71,15 @@ class AuditLog(Base):
 Base.metadata.create_all(bind=engine)
 
 def audit(db: Session, user: str, action: str, details: str):
-    log = AuditLog(
+    db.add(AuditLog(
         id=str(uuid.uuid4()),
         user=user,
         action=action,
         details=details
-    )
-    db.add(log)
+    ))
     db.commit()
 
-# ============================================================
-# AUTH
-# ============================================================
-
+# ---------------- AUTH ----------------
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -135,14 +99,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         username = payload.get("sub")
         if username not in USERS:
             raise HTTPException(status_code=401)
-        return USERS[username]
+        return {"username": username, "role": USERS[username]["role"]}
     except JWTError:
         raise HTTPException(status_code=401)
 
-# ============================================================
-# VECTOR ENGINE (LOCAL AI BRAIN)
-# ============================================================
-
+# ---------------- VECTOR ENGINE ----------------
 model = SentenceTransformer("all-MiniLM-L6-v2")
 DIM = 384
 
@@ -173,10 +134,8 @@ def index_document(text, source):
     chunks = chunk_text(text)
     embeddings = model.encode(chunks)
     index.add(np.array(embeddings).astype("float32"))
-
     for c in chunks:
         metadata.append({"text": c, "source": source})
-
     save_index()
 
 def search(query, k=5):
@@ -184,10 +143,7 @@ def search(query, k=5):
     _, ids = index.search(q, k)
     return [metadata[i] for i in ids[0] if i < len(metadata)]
 
-# ============================================================
-# API MODELS
-# ============================================================
-
+# ---------------- API MODELS ----------------
 class QueryRequest(BaseModel):
     question: str
 
@@ -195,10 +151,7 @@ class QueryResponse(BaseModel):
     answer: str
     sources: List[str]
 
-# ============================================================
-# ENDPOINTS
-# ============================================================
-
+# ---------------- ENDPOINTS ----------------
 @app.post("/upload")
 def upload_docs(
     files: List[UploadFile] = File(...),
@@ -212,7 +165,6 @@ def upload_docs(
         path = os.path.join(UPLOAD_DIR, f.filename)
         with open(path, "wb") as buffer:
             shutil.copyfileobj(f.file, buffer)
-
         text = read_pdf(path)
         index_document(text, f.filename)
 
@@ -226,7 +178,6 @@ def ask(
     db: Session = Depends(SessionLocal)
 ):
     results = search(req.question)
-
     if not results:
         raise HTTPException(status_code=404, detail="No documents indexed")
 
@@ -234,7 +185,6 @@ def ask(
     sources = list({r["source"] for r in results})
 
     audit(db, user["username"], "QUERY", req.question)
-
     return QueryResponse(answer=answer, sources=sources)
 
 @app.get("/health")
