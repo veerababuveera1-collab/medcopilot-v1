@@ -1,10 +1,3 @@
-fastapi
-uvicorn
-python-multipart
-python-jose
-passlib[bcrypt]
-sqlalchemy
+streamlit
+google-generativeai
 pypdf
-sentence-transformers
-faiss-cpu
-numpy
