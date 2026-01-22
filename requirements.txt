@@ -6,3 +6,10 @@ numpy
 pandas
 requests
 reportlab
+streamlit
+faiss-cpu
+sentence-transformers
+PyPDF2
+numpy
+
+
