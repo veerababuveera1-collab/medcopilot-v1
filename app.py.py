@@ -17,7 +17,10 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 
-# ---------------- CONFIG ----------------
+# =====================================================
+# CONFIG
+# =====================================================
+
 SECRET_KEY = "MEDINTEL_SECRET_KEY"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -31,10 +34,16 @@ AUDIT_DB = "sqlite:///./audit.db"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(DB_DIR, exist_ok=True)
 
-# ---------------- APP ----------------
+# =====================================================
+# APP
+# =====================================================
+
 app = FastAPI(title="MEDINTEL AI Enterprise Backend", version="1.0")
 
-# ---------------- SECURITY ----------------
+# =====================================================
+# SECURITY
+# =====================================================
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -49,13 +58,19 @@ def create_access_token(data: dict):
     data.update({"exp": expire})
     return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
-# ---------------- USERS ----------------
+# =====================================================
+# USERS
+# =====================================================
+
 USERS = {
     "admin": {"password": hash_password("admin123"), "role": "ADMIN"},
     "doctor": {"password": hash_password("doctor123"), "role": "REVIEWER"}
 }
 
-# ---------------- DATABASE (AUDIT) ----------------
+# =====================================================
+# DATABASE (AUDIT)
+# =====================================================
+
 engine = create_engine(AUDIT_DB, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
@@ -79,7 +94,10 @@ def audit(db: Session, user: str, action: str, details: str):
     ))
     db.commit()
 
-# ---------------- AUTH ----------------
+# =====================================================
+# AUTH
+# =====================================================
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -103,7 +121,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=401)
 
-# ---------------- VECTOR ENGINE ----------------
+# =====================================================
+# AI VECTOR ENGINE (LOCAL)
+# =====================================================
+
 model = SentenceTransformer("all-MiniLM-L6-v2")
 DIM = 384
 
@@ -143,7 +164,10 @@ def search(query, k=5):
     _, ids = index.search(q, k)
     return [metadata[i] for i in ids[0] if i < len(metadata)]
 
-# ---------------- API MODELS ----------------
+# =====================================================
+# API MODELS
+# =====================================================
+
 class QueryRequest(BaseModel):
     question: str
 
@@ -151,7 +175,10 @@ class QueryResponse(BaseModel):
     answer: str
     sources: List[str]
 
-# ---------------- ENDPOINTS ----------------
+# =====================================================
+# ENDPOINTS
+# =====================================================
+
 @app.post("/upload")
 def upload_docs(
     files: List[UploadFile] = File(...),
@@ -189,4 +216,4 @@ def ask(
 
 @app.get("/health")
 def health():
-    return {"status": "MEDINTEL AI Enterprise Engine Running"}
+    return {"status": "MEDINTEL AI Engine Running"}
