@@ -1,254 +1,205 @@
 # ============================================================
-# VEERA AI — Defence Intelligence OS (DEMO PLATFORM)
-# Strategy, Simulation & Advisory Copilot (Non-Operational)
-# Author: Veera Babu
+# Clinical Research Copilot — Active Verification Framework
+# Powered by Grok (xAI) LLM
+# Evidence • Contradiction • Guideline Anchoring • CRTS
 # ============================================================
 
 import streamlit as st
-import os
-import google.generativeai as genai
-from datetime import datetime
+import requests, os, json, math
+import numpy as np
+from dotenv import load_dotenv
+from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
+import faiss
 
 # ============================================================
-# APP CONFIG
+# CONFIG
 # ============================================================
 
-st.set_page_config(
-    page_title="VEERA AI — Defence Intelligence OS",
-    page_icon="🛡️",
-    layout="wide"
-)
+st.set_page_config("Clinical Research Copilot (AV)", layout="wide")
+load_dotenv()
+
+GROK_API_KEY = os.getenv("GROK_API_KEY")
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")
+
+EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ============================================================
-# GEMINI CONFIG
+# UI
 # ============================================================
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or "YOUR_GEMINI_API_KEY"
-genai.configure(api_key=GEMINI_API_KEY)
+st.title("🧠 Clinical Research Copilot — Active Verification Framework")
+st.caption("Evidence-first clinical research intelligence with trust scoring")
+st.warning("⚠ Research Decision Support Tool. Not for clinical diagnosis or treatment.")
 
-MODEL_NAME = "models/gemini-1.5-pro"
+query = st.text_input("Enter clinical research query")
 
-# ============================================================
-# SYSTEM PROMPT (ADVISORY / NON-OPERATIONAL)
-# ============================================================
+guideline_url = st.text_input("Paste Guideline URL (NICE / WHO)")
+pdf_file = st.file_uploader("Upload Clinical PDF", type=["pdf"])
 
-SYSTEM_PROMPT = """
-You are VEERA AI — a Defence Strategy & Intelligence Advisory Copilot.
+alpha = st.slider("α Source Fidelity Weight", 0.0, 1.0, 0.30)
+beta = st.slider("β Contradiction Weight", 0.0, 1.0, 0.30)
+gamma = st.slider("γ Audit Coverage Weight", 0.0, 1.0, 0.20)
+delta = st.slider("δ Guideline Alignment Weight", 0.0, 1.0, 0.20)
 
-You provide high-level, non-operational analysis for:
-- strategic planning
-- risk assessment
-- readiness evaluation
-- scenario simulation
-- decision support
-
-Rules:
-1. Do not provide tactical combat instructions or targeting guidance.
-2. Do not generate real-world attack plans.
-3. Focus on strategy, risk, preparedness, resilience, and policy.
-4. Maintain professional defence-analyst tone.
-5. Support English and Telugu.
-6. If a request is operational or sensitive, respond with a safe alternative.
-"""
+run = st.button("Run Active Verification")
 
 # ============================================================
-# AI ENGINE (ADVISORY)
+# External APIs
 # ============================================================
 
-def get_defence_advisory(question, context=""):
-    model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        system_instruction=SYSTEM_PROMPT
-    )
+def search_web(query):
+    url = "https://api.tavily.com/search"
+    payload = {
+        "api_key": SEARCH_API_KEY,
+        "query": query,
+        "search_depth": "advanced",
+        "max_results": 10
+    }
+    r = requests.post(url, json=payload, timeout=30)
+    return r.json()["results"]
+
+def call_grok(prompt):
+    url = "https://api.x.ai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": "grok-2-latest",
+        "messages": [
+            {"role": "system", "content": "You are a clinical research copilot. Use only provided evidence."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2
+    }
+
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+    return r.json()["choices"][0]["message"]["content"]
+
+# ============================================================
+# Evidence Processing
+# ============================================================
+
+def extract_pdf_text(pdf):
+    reader = PdfReader(pdf)
+    return " ".join([p.extract_text() for p in reader.pages])
+
+def embed_chunks(text, chunk_size=500):
+    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+    vectors = EMBED_MODEL.encode(chunks)
+    return chunks, np.array(vectors)
+
+def build_faiss(vectors):
+    index = faiss.IndexFlatL2(vectors.shape[1])
+    index.add(vectors)
+    return index
+
+# ============================================================
+# Verification Logic
+# ============================================================
+
+def detect_contradictions(studies):
+    risks = [s for s in studies if "risk" in s["content"].lower() or "adverse" in s["content"].lower()]
+    return len(risks)
+
+def guideline_alignment(answer, guideline_text):
+    v1 = EMBED_MODEL.encode(answer)
+    v2 = EMBED_MODEL.encode(guideline_text)
+    score = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    return float(score)
+
+# ============================================================
+# CRTS Calculation
+# ============================================================
+
+def compute_crts(sf, crr, ar, ga):
+    return round(alpha*sf + beta*crr + gamma*ar + delta*ga, 2)
+
+# ============================================================
+# Main Pipeline
+# ============================================================
+
+if run and query:
+
+    st.info("🔍 Searching clinical evidence...")
+    studies = search_web(query)
+
+    evidence_text = " ".join([s["content"] for s in studies])
+
+    if pdf_file:
+        pdf_text = extract_pdf_text(pdf_file)
+        evidence_text += pdf_text
+
+    chunks, vectors = embed_chunks(evidence_text)
+    index = build_faiss(vectors)
+
+    st.success(f"Loaded {len(studies)} web studies")
+
+    st.info("🧠 Generating research synthesis using Grok...")
 
     prompt = f"""
-You are a defence intelligence advisor.
+    You are a clinical research copilot.
 
-Context (if any):
-{context}
+    Answer the following research question strictly using the provided evidence.
+    Highlight any uncertainty or conflicting findings.
 
-Question:
-{question}
+    Research Question:
+    {query}
 
-Instructions:
-- Provide strategic, non-operational analysis
-- Focus on risk, readiness, resilience, and policy
-- Offer options and considerations (not commands)
-- Use clear, professional language
-"""
+    Evidence Corpus:
+    {evidence_text[:6000]}
+    """
 
-    response = model.generate_content(
-        prompt,
-        generation_config={
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "max_output_tokens": 2048
-        }
-    )
+    answer = call_grok(prompt)
 
-    return response.text
+    st.subheader("🧾 Research Synthesis (Grok)")
+    st.write(answer)
 
+    # ============================================================
+    # Verification
+    # ============================================================
 
-# ============================================================
-# HEADER
-# ============================================================
+    contradictions = detect_contradictions(studies)
+    crr = 1 if contradictions > 0 else 0
 
-st.markdown("""
-# 🛡️ VEERA AI — Defence Intelligence OS (Demo)
-### Strategy, Simulation & Decision Support Copilot
+    sf = 1.0  # Evidence grounded
+    ar = min(1, len(studies)/10)
 
-> Advisory platform for defence planning, readiness and resilience.
+    ga = 0.0
+    if guideline_url:
+        guide_text = requests.get(guideline_url, timeout=20).text[:5000]
+        ga = guideline_alignment(answer, guide_text)
 
----
-""")
+    crts = compute_crts(sf, crr, ar, ga)
 
-# ============================================================
-# SIDEBAR — MODULES
-# ============================================================
+    # ============================================================
+    # Audit Report
+    # ============================================================
 
-module = st.sidebar.selectbox(
-    "Select Defence Intelligence Module",
-    [
-        "🛰 Strategic Threat Assessment",
-        "📊 Readiness & Risk Analysis",
-        "🧭 Scenario Simulation (What-If)",
-        "📡 Cyber & Space Resilience",
-        "🗺 Border & Maritime Security (Policy View)",
-        "🔐 Governance & Compliance"
-    ]
-)
+    st.subheader("📊 Active Verification Audit")
 
-# ============================================================
-# MODULE 1: Strategic Threat Assessment
-# ============================================================
+    col1, col2, col3, col4 = st.columns(4)
 
-if module == "🛰 Strategic Threat Assessment":
-    st.subheader("🛰 Strategic Threat Assessment (Advisory)")
+    col1.metric("Source Fidelity (SF)", f"{sf*100:.0f}%")
+    col2.metric("Contradiction Detected (CRR)", "Yes" if crr else "No")
+    col3.metric("Audit Coverage (AR*)", f"{ar:.2f}")
+    col4.metric("Guideline Alignment (GA)", f"{ga:.2f}")
 
-    topic = st.text_area(
-        "Describe the strategic environment or concern (high-level):",
-        placeholder="Example: Regional stability, hybrid threats, supply chain resilience..."
-    )
+    st.subheader("✅ Clinical Response Transparency Score (CRTS)")
+    st.metric("Trust Score", crts)
 
-    if st.button("Generate Assessment"):
-        with st.spinner("Analyzing strategic landscape..."):
-            answer = get_defence_advisory(topic)
+    if crts >= 0.8:
+        st.success("High Trust Research Output")
+    elif crts >= 0.5:
+        st.warning("Moderate Trust — Review Recommended")
+    else:
+        st.error("Low Trust — Verification Required")
 
-        st.markdown("### 🧠 VEERA AI — Strategic Assessment")
-        st.write(answer)
-
-
-# ============================================================
-# MODULE 2: Readiness & Risk Analysis
-# ============================================================
-
-if module == "📊 Readiness & Risk Analysis":
-    st.subheader("📊 Readiness & Risk Analysis")
-
-    inputs = st.text_area(
-        "Enter readiness factors (logistics, training, cyber posture, supply chain, etc.):",
-        placeholder="Example: Force readiness, logistics, cyber hygiene, satellite redundancy..."
-    )
-
-    if st.button("Evaluate Readiness & Risks"):
-        with st.spinner("Evaluating readiness and risk posture..."):
-            answer = get_defence_advisory(inputs)
-
-        st.markdown("### 📊 VEERA AI — Readiness & Risk Summary")
-        st.write(answer)
-
-
-# ============================================================
-# MODULE 3: Scenario Simulation (What-If)
-# ============================================================
-
-if module == "🧭 Scenario Simulation (What-If)":
-    st.subheader("🧭 Scenario Simulation (What-If)")
-
-    scenario = st.text_area(
-        "Describe a hypothetical scenario for policy/strategy simulation:",
-        placeholder="Example: Communication disruption, logistics bottleneck, cyber incident..."
-    )
-
-    if st.button("Run What-If Simulation"):
-        with st.spinner("Simulating scenario (policy/strategy level)..."):
-            answer = get_defence_advisory(scenario)
-
-        st.markdown("### 🧭 VEERA AI — Scenario Insights")
-        st.write(answer)
-
-
-# ============================================================
-# MODULE 4: Cyber & Space Resilience
-# ============================================================
-
-if module == "📡 Cyber & Space Resilience":
-    st.subheader("📡 Cyber & Space Resilience (Advisory)")
-
-    query = st.text_area(
-        "Ask about cyber, satellite, and communication resilience:",
-        placeholder="Example: Redundancy, incident response, zero-trust posture..."
-    )
-
-    if st.button("Generate Resilience Guidance"):
-        with st.spinner("Preparing resilience guidance..."):
-            answer = get_defence_advisory(query)
-
-        st.markdown("### 📡 VEERA AI — Resilience Guidance")
-        st.write(answer)
-
-
-# ============================================================
-# MODULE 5: Border & Maritime Security (Policy View)
-# ============================================================
-
-if module == "🗺 Border & Maritime Security (Policy View)":
-    st.subheader("🗺 Border & Maritime Security (Policy View)")
-
-    policy_query = st.text_area(
-        "Enter policy/strategy question (no operational details):",
-        placeholder="Example: Surveillance policy, coordination frameworks, capacity building..."
-    )
-
-    if st.button("Generate Policy Advisory"):
-        with st.spinner("Generating policy advisory..."):
-            answer = get_defence_advisory(policy_query)
-
-        st.markdown("### 🗺 VEERA AI — Policy Advisory")
-        st.write(answer)
-
-
-# ============================================================
-# MODULE 6: Governance & Compliance
-# ============================================================
-
-if module == "🔐 Governance & Compliance":
-    st.subheader("🔐 Governance, Ethics & Compliance")
-
-    gov_query = st.text_area(
-        "Ask about governance, ethics, audits, and compliance:",
-        placeholder="Example: AI governance, audit trails, data protection, procurement..."
-    )
-
-    if st.button("Get Governance Guidance"):
-        with st.spinner("Preparing governance guidance..."):
-            answer = get_defence_advisory(gov_query)
-
-        st.markdown("### 🔐 VEERA AI — Governance Guidance")
-        st.write(answer)
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.markdown("""
----
-### 🔐 Safety & Ethics by Design  
-✔ Advisory-only (non-operational)  
-✔ Strategy & policy focused  
-✔ Audit-friendly outputs  
-✔ Multi-language ready  
-
-**VEERA AI — Defence Intelligence OS (Demo Platform)**
-""")
+    with st.expander("🔎 View Evidence Sources"):
+        for s in studies:
+            st.markdown(f"**{s['title']}**")
+            st.write(s["url"])
+            st.write(s["content"][:500])
+            st.divider()
