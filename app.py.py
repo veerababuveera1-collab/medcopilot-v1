@@ -1,236 +1,242 @@
-import streamlit as st
+# ============================================================
+# MEDINTEL AI — Enterprise Clinical Research Intelligence Engine
+# Author: Veera Babu
+# Backend: FastAPI + JWT + RBAC + Audit + RAG
+# ============================================================
+
 import os
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
+import shutil
+import uuid
+import json
+from datetime import datetime, timedelta
+from typing import List
+
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
+from jose import jwt, JWTError
+from passlib.context import CryptContext
+
+from sqlalchemy import create_engine, Column, String, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
 from pypdf import PdfReader
-import time
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
 
-# ===================== CONFIG =====================
-st.set_page_config(
-    page_title="MedCopilot Enterprise — Hospital AI Command Center",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ============================================================
+# CONFIG
+# ============================================================
 
-DATA_DIR = "data/pdfs"
-INDEX_DIR = "index"
-INDEX_PATH = "index/faiss_index.bin"
+SECRET_KEY = "MEDINTEL_SECRET_KEY_CHANGE_IN_PROD"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(INDEX_DIR, exist_ok=True)
+UPLOAD_DIR = "uploads"
+DB_DIR = "database"
+VECTOR_INDEX = f"{DB_DIR}/index.faiss"
+META_FILE = f"{DB_DIR}/meta.json"
+AUDIT_DB = "sqlite:///./audit.db"
 
-# ===================== LOAD MODEL =====================
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(DB_DIR, exist_ok=True)
 
-model = load_model()
+# ============================================================
+# FASTAPI
+# ============================================================
 
-# ===================== UI STYLE =====================
-st.markdown("""
-<style>
-.main-title {
-    font-size: 36px;
-    font-weight: bold;
-    color: #0d6efd;
+app = FastAPI(title="MEDINTEL AI Enterprise Backend", version="1.0")
+
+# ============================================================
+# SECURITY
+# ============================================================
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
+
+def verify_password(password: str, hashed: str):
+    return pwd_context.verify(password, hashed)
+
+def create_access_token(data: dict):
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    data.update({"exp": expire})
+    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+
+# ============================================================
+# USERS (Replace with LDAP later)
+# ============================================================
+
+USERS = {
+    "admin": {
+        "username": "admin",
+        "password": hash_password("admin123"),
+        "role": "ADMIN"
+    },
+    "doctor": {
+        "username": "doctor",
+        "password": hash_password("doctor123"),
+        "role": "REVIEWER"
+    }
 }
-.card {
-    padding: 20px;
-    border-radius: 12px;
-    background: #f8f9fa;
-    box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-}
-.kpi {
-    font-size: 26px;
-    font-weight: bold;
-    color: #198754;
-}
-.section-title {
-    font-size: 22px;
-    font-weight: bold;
-    color: #212529;
-}
-.evidence-box {
-    padding: 15px;
-    border-radius: 10px;
-    background: #ffffff;
-    border-left: 5px solid #0d6efd;
-    margin-bottom: 15px;
-}
-</style>
-""", unsafe_allow_html=True)
 
-# ===================== FUNCTIONS =====================
+# ============================================================
+# DATABASE (AUDIT TRAIL)
+# ============================================================
 
-def load_pdfs():
-    texts = []
-    sources = []
-    for file in os.listdir(DATA_DIR):
-        if file.endswith(".pdf"):
-            reader = PdfReader(os.path.join(DATA_DIR, file))
-            for page_num, page in enumerate(reader.pages):
-                text = page.extract_text()
-                if text:
-                    texts.append(text)
-                    sources.append(f"{file} — Page {page_num+1}")
-    return texts, sources
+engine = create_engine(AUDIT_DB, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
-def build_index(texts):
-    embeddings = model.encode(texts)
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings).astype("float32"))
-    faiss.write_index(index, INDEX_PATH)
-    return len(texts)
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(String, primary_key=True)
+    user = Column(String)
+    action = Column(String)
+    details = Column(Text)
+    timestamp = Column(DateTime, default=datetime.utcnow)
 
-def load_index():
-    if os.path.exists(INDEX_PATH):
-        return faiss.read_index(INDEX_PATH)
-    return None
+Base.metadata.create_all(bind=engine)
 
-def search_index(query, texts, sources, k=3):
-    index = load_index()
-    if index is None:
-        return []
-
-    q_emb = model.encode([query]).astype("float32")
-    D, I = index.search(q_emb, k)
-
-    results = []
-    for idx in I[0]:
-        if idx < len(texts):
-            results.append((texts[idx], sources[idx]))
-    return results
-
-def format_clinical_output(query, results):
-    output = f"## 🧠 Clinical Answer for: {query}\n\n"
-    output += "Based on hospital-grade medical evidence:\n\n"
-
-    for i, (text, source) in enumerate(results, 1):
-        summary = text[:600].replace("\n", " ")
-        output += f"### 📄 Evidence {i}\n"
-        output += f"{summary}...\n\n"
-        output += f"📚 Source: {source}\n\n"
-
-    output += "---\n"
-    output += "### ✅ Clinical Confidence Score: **94.8%**\n"
-    return output
-
-# ===================== HEADER =====================
-st.markdown("<div class='main-title'>🧠 MedCopilot Enterprise — Hospital AI Command Center</div>", unsafe_allow_html=True)
-st.write("Clinical Evidence • Medical Intelligence • Global Research")
-st.divider()
-
-# ===================== SIDEBAR =====================
-st.sidebar.title("🏥 MedCopilot Control Panel")
-
-menu = st.sidebar.radio(
-    "Navigation",
-    ["📊 Dashboard", "🔍 Clinical AI Console", "📁 PDF Knowledge", "⚙ System Health"]
-)
-
-# ===================== LOAD DATA =====================
-texts_cache, sources_cache = load_pdfs()
-total_pdfs = len(os.listdir(DATA_DIR))
-indexed_pages = len(texts_cache)
-
-# ===================== DASHBOARD =====================
-if menu == "📊 Dashboard":
-    st.markdown("<div class='section-title'>📊 Hospital Intelligence Dashboard</div>", unsafe_allow_html=True)
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.markdown(f"<div class='card'>Total PDFs<br><div class='kpi'>{total_pdfs}</div></div>", unsafe_allow_html=True)
-
-    with col2:
-        st.markdown(f"<div class='card'>Indexed Pages<br><div class='kpi'>{indexed_pages}</div></div>", unsafe_allow_html=True)
-
-    with col3:
-        st.markdown("<div class='card'>AI Confidence<br><div class='kpi'>96.5%</div></div>", unsafe_allow_html=True)
-
-    with col4:
-        st.markdown("<div class='card'>Queries Today<br><div class='kpi'>61</div></div>", unsafe_allow_html=True)
-
-    st.divider()
-
-    st.success("All Hospital AI Systems Operational")
-    st.info("Clinical Intelligence Engine: Active")
-    st.info("Evidence Index Engine: Active")
-    st.info("AI Knowledge Base: Ready")
-
-# ===================== CLINICAL AI =====================
-elif menu == "🔍 Clinical AI Console":
-    st.markdown("<div class='section-title'>🔍 Clinical Intelligence Console</div>", unsafe_allow_html=True)
-
-    query = st.text_area("Ask a clinical or hospital question", height=120)
-
-    if st.button("🚀 Run Clinical Intelligence"):
-        if not os.path.exists(INDEX_PATH):
-            st.error("Evidence Index not built. Please build it first from PDF Knowledge page.")
-        else:
-            with st.spinner("Searching hospital evidence..."):
-                time.sleep(1)
-                texts, sources = load_pdfs()
-                results = search_index(query, texts, sources)
-
-            st.success("Clinical Evidence Found")
-
-            formatted_output = format_clinical_output(query, results)
-            st.markdown(formatted_output)
-
-# ===================== PDF KNOWLEDGE =====================
-elif menu == "📁 PDF Knowledge":
-    st.markdown("<div class='section-title'>📁 Clinical PDF Knowledge Library</div>", unsafe_allow_html=True)
-
-    uploaded_files = st.file_uploader(
-        "Upload Clinical PDFs (Guidelines, Research Papers, Protocols)",
-        type=["pdf"],
-        accept_multiple_files=True
+def audit(db: Session, user: str, action: str, details: str):
+    log = AuditLog(
+        id=str(uuid.uuid4()),
+        user=user,
+        action=action,
+        details=details
     )
+    db.add(log)
+    db.commit()
 
-    if uploaded_files:
-        for pdf in uploaded_files:
-            with open(os.path.join(DATA_DIR, pdf.name), "wb") as f:
-                f.write(pdf.getbuffer())
-            st.success(f"Saved: {pdf.name}")
+# ============================================================
+# AUTH
+# ============================================================
 
-    st.divider()
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
-    if st.button("🧠 Build Evidence Index"):
-        with st.spinner("Building hospital knowledge index..."):
-            texts, _ = load_pdfs()
-            pages = build_index(texts)
+@app.post("/token", response_model=Token)
+def login(username: str, password: str):
+    user = USERS.get(username)
+    if not user or not verify_password(password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        st.success("Evidence Index Built Successfully!")
-        st.info(f"Indexed Pages: {pages}")
+    token = create_access_token({"sub": username, "role": user["role"]})
+    return {"access_token": token, "token_type": "bearer"}
 
-    st.divider()
-    st.write("📚 Knowledge Base Status")
-    st.success(f"{total_pdfs} PDFs available")
-    st.success(f"{indexed_pages} pages indexed")
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if username not in USERS:
+            raise HTTPException(status_code=401)
+        return USERS[username]
+    except JWTError:
+        raise HTTPException(status_code=401)
 
-# ===================== SYSTEM HEALTH =====================
-elif menu == "⚙ System Health":
-    st.markdown("<div class='section-title'>⚙ System Health Monitor</div>", unsafe_allow_html=True)
+# ============================================================
+# VECTOR ENGINE (LOCAL AI BRAIN)
+# ============================================================
 
-    st.success("Embedding Model: MiniLM-L6-v2")
-    st.success("Vector DB: FAISS")
-    st.success("Evidence Index: Ready")
-    st.success("Clinical Engine: Online")
-    st.success("AI Core: Stable")
+model = SentenceTransformer("all-MiniLM-L6-v2")
+DIM = 384
 
-    st.write("AI Performance")
-    st.progress(95)
+if os.path.exists(VECTOR_INDEX) and os.path.exists(META_FILE):
+    index = faiss.read_index(VECTOR_INDEX)
+    metadata = json.load(open(META_FILE))
+else:
+    index = faiss.IndexFlatL2(DIM)
+    metadata = []
 
-    st.write("Database Health")
-    st.progress(98)
+def save_index():
+    faiss.write_index(index, VECTOR_INDEX)
+    json.dump(metadata, open(META_FILE, "w"), indent=2)
 
-    st.write("API Connectivity")
-    st.progress(96)
+def read_pdf(path):
+    reader = PdfReader(path)
+    text = ""
+    for p in reader.pages:
+        if p.extract_text():
+            text += p.extract_text()
+    return text
 
-# ===================== FOOTER =====================
-st.divider()
-st.caption("🧠 MedCopilot Enterprise © Hospital AI Platform | Clinical Decision Intelligence")
+def chunk_text(text, size=500):
+    words = text.split()
+    return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
+
+def index_document(text, source):
+    chunks = chunk_text(text)
+    embeddings = model.encode(chunks)
+    index.add(np.array(embeddings).astype("float32"))
+
+    for c in chunks:
+        metadata.append({"text": c, "source": source})
+
+    save_index()
+
+def search(query, k=5):
+    q = model.encode([query]).astype("float32")
+    _, ids = index.search(q, k)
+    return [metadata[i] for i in ids[0] if i < len(metadata)]
+
+# ============================================================
+# API MODELS
+# ============================================================
+
+class QueryRequest(BaseModel):
+    question: str
+
+class QueryResponse(BaseModel):
+    answer: str
+    sources: List[str]
+
+# ============================================================
+# ENDPOINTS
+# ============================================================
+
+@app.post("/upload")
+def upload_docs(
+    files: List[UploadFile] = File(...),
+    user=Depends(get_current_user),
+    db: Session = Depends(SessionLocal)
+):
+    if user["role"] != "ADMIN":
+        raise HTTPException(status_code=403, detail="Only ADMIN can upload")
+
+    for f in files:
+        path = os.path.join(UPLOAD_DIR, f.filename)
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(f.file, buffer)
+
+        text = read_pdf(path)
+        index_document(text, f.filename)
+
+    audit(db, user["username"], "UPLOAD", "Documents indexed")
+    return {"status": "Indexed successfully"}
+
+@app.post("/ask", response_model=QueryResponse)
+def ask(
+    req: QueryRequest,
+    user=Depends(get_current_user),
+    db: Session = Depends(SessionLocal)
+):
+    results = search(req.question)
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No documents indexed")
+
+    answer = "\n".join([r["text"][:300] for r in results])
+    sources = list({r["source"] for r in results})
+
+    audit(db, user["username"], "QUERY", req.question)
+
+    return QueryResponse(answer=answer, sources=sources)
+
+@app.get("/health")
+def health():
+    return {"status": "MEDINTEL AI Enterprise Engine Running"}
